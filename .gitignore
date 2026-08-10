@@ -1,0 +1,29 @@
+.env
+.env.*
+!.env.example
+
+# Node.js / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+
+# Tooling and editors
+.coverage
+htmlcov/
+.DS_Store
+.idea/
+.vscode/
+
+# Local containers and data
+postgres-data/
+redis-data/
