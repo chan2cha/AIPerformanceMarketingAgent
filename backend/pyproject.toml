@@ -11,8 +11,10 @@ dependencies = [
   "alembic>=1.14,<2",
   "celery[redis]>=5.4,<6",
   "fastapi>=0.115,<1",
+  "openai>=2.0,<3",
   "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.7,<3",
+  "PyJWT[crypto]>=2.10,<3",
   "sqlalchemy>=2.0,<3",
   "uvicorn[standard]>=0.34,<1",
 ]
@@ -27,13 +29,23 @@ dev = [
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+markers = [
+  "openai_smoke: opt-in test that makes a billable OpenAI API request",
+]
 
 [tool.ruff]
+extend-exclude = ["build"]
 line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 
+[tool.ruff.lint.isort]
+known-third-party = ["alembic"]
+
 [tool.setuptools.packages.find]
 include = ["app*", "worker*"]
+
+[tool.setuptools.package-data]
+app = ["ai/pricing.json", "ai/prompts/**/*.md"]

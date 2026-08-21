@@ -87,7 +87,10 @@ MVP에서는 Owner/Admin/Member 수준의 단순 권한으로 충분하다.
 - 경쟁사에는 이름, URL, 플랫폼 식별자/URL 등을 저장할 수 있다.
 
 ### Creative
-- 사용자는 경쟁사 또는 자사 Creative를 등록할 수 있다.
+- 사용자는 브랜드, 업종, 타깃 국가·언어, 경쟁사를 한 번 설정할 수 있다.
+- 시스템은 설정을 기반으로 광고 라이브러리와 허용된 데이터 소스에서 신규 Creative를 주기적으로 탐색한다.
+- 수집된 Creative는 출처와 외부 ID를 기록하고 중복 없이 저장한다.
+- 자동 수집이 지원되지 않는 콘텐츠는 URL 또는 원문으로 보완 등록할 수 있다.
 - Creative는 source, source URL, media type, asset, raw payload를 저장할 수 있다.
 - Creative 목록을 조회하고 필터링할 수 있다.
 
@@ -126,6 +129,13 @@ MVP에서는 Owner/Admin/Member 수준의 단순 권한으로 충분하다.
 
 ## 7. Phase 2 이후 핵심 User Story
 
+### Market Intelligence
+- 경쟁사별 Meta/TikTok 수집 소스를 설정한다.
+- 국가·언어·업종 키워드로 시장 광고 탐색 범위를 설정한다.
+- 수집은 비동기 Job으로 실행되며 최근 성공·실패 상태를 확인한다.
+- 신규 광고는 자동 분석되어 경쟁사·업종 패턴의 입력으로 사용된다.
+- 플랫폼이 제공하지 않는 국가·광고 유형은 지원 범위를 사용자에게 명확히 표시한다.
+
 ### Performance
 - Meta Ad Account 연결
 - Campaign/Ad/Creative 성과 일 단위 sync
@@ -163,13 +173,13 @@ MVP 단계에서는 대규모 트래픽보다 신뢰성과 개발 속도를 우�
 ## 9. 성공 기준
 
 ### MVP 기술 성공
-- Organization 생성부터 Creative 분석 완료까지 end-to-end 동작
+- Organization 생성부터 수집 소스 설정, Creative 자동 수집·분석 완료까지 end-to-end 동작
 - tenant isolation 테스트 성공
 - AI 호출 원가 추적 가능
 
 ### Product 성공
 Pilot 고객이:
-- 실제 경쟁사 Creative를 등록/사용
+- 실제 경쟁사를 설정하고 수집된 Creative를 반복적으로 사용
 - 주기적으로 분석 결과를 확인
 - 다음 광고 기획에 분석 결과를 사용
 

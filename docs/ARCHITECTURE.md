@@ -42,6 +42,8 @@ MVP는 **Modular Monolith + Asynchronous Worker** 구조로 만든다.
            OpenAI/...     Meta/...         Supabase/S3
 ```
 
+Celery Beat는 별도 `scheduler` process로 실행하며, 5분마다 due `CollectionSource`를 확인해 sync Job만 queue에 넣는다. 실제 수집과 AI 분석은 Worker가 담당한다.
+
 ## 3. Repository Layout
 
 ```text
@@ -144,6 +146,36 @@ Job completed
 ```
 
 실패는 retryable 여부에 따라 재시도 후 `failed`로 기록하며 사용자에게는 sanitized error만 노출한다.
+
+## 5.1 Market Content Collection / Job Flow
+
+광고 라이브러리와 외부 데이터 소스는 AI Provider와 동일하게 도메인 코드에서 분리한다.
+
+```text
+브랜드·경쟁사·시장 설정
+        ↓
+CollectionSource 저장 (주기 / 다음 실행 시각 / 상태)
+        ↓
+POST /collection-sources/{id}/sync
+        ↓
+Job row 생성 (market_content_sync, queued)
+        ↓
+Celery Worker
+        ↓
+AdLibraryCollectorRouter → platform adapter
+        ↓
+공통 CollectedCreative 형식으로 정규화
+        ↓
+(organization_id, source, source_external_id) 중복 제거
+        ↓
+Creative upsert
+        ↓
+신규 Creative analysis Job 생성
+```
+
+성공·실패 후 `last_attempt_at`, `last_sync_at`, `last_error_code`, `next_sync_at`을 갱신한다. `paused` source는 scheduler가 건너뛰며 수동 실행 여부는 API 권한 검증 후 허용한다.
+
+`AdLibraryCollector`는 플랫폼별 API, 승인된 데이터 공급자, 로컬 Fake 구현을 감싼다. 공식 접근이 불가능한 국가·소스는 실패가 아니라 명시적인 `unavailable` 운영 상태로 처리한다. 제품의 핵심 수집 경로를 비공식 화면 스크래핑에 의존하지 않는다.
 
 ## 6. AI Provider Abstraction
 

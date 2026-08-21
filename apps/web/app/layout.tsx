@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI Performance Marketing",
-  description: "B2B AI Performance Marketing SaaS MVP",
+  title: "Signal Desk · 광고 소재 분석",
+  description: "우리 브랜드와 경쟁 브랜드의 광고 소재를 모아 AI로 분석하는 작업 공간",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

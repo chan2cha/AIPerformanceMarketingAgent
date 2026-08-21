@@ -8,6 +8,11 @@ celery_app = Celery(
     "performance_marketing",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
+    include=[
+        "worker.tasks.creative_analysis",
+        "worker.tasks.market_content_schedule",
+        "worker.tasks.market_content_sync",
+    ],
 )
 celery_app.conf.update(
     task_serializer="json",
@@ -15,4 +20,10 @@ celery_app.conf.update(
     accept_content=["json"],
     timezone="UTC",
     enable_utc=True,
+    beat_schedule={
+        "schedule-due-market-content-syncs": {
+            "task": "market_content_schedule.run",
+            "schedule": 300.0,
+        }
+    },
 )

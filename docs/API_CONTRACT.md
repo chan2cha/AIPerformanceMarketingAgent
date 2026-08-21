@@ -89,12 +89,14 @@ Partial update.
 ### GET `/api/v1/brands/{brand_id}/competitors`
 
 ### DELETE `/api/v1/competitors/{competitor_id}`
-MVP에서는 hard delete 가능하나 관련 Creative 존재 시 정책을 명확히 한다.
+Phase 1에서는 관련 Creative가 아직 없으므로 hard delete한다. Phase 2에서 Creative FK를 추가하기 전에 삭제 정책을 다시 결정한다.
 
 ## 6. Creatives
 
 ### POST `/api/v1/brands/{brand_id}/creatives`
 MVP manual import.
+
+수동 등록은 자동 수집 누락을 보완하는 fallback이다.
 
 ```json
 {
@@ -119,6 +121,60 @@ Filters 후보:
 
 ### GET `/api/v1/creatives/{creative_id}`
 최신 analysis summary를 포함할 수 있다.
+
+## 6.1 Market Content Collection
+
+### POST `/api/v1/brands/{brand_id}/collection-sources`
+
+```json
+{
+  "platform":"meta_ad_library",
+  "scope":"competitor",
+  "competitor_id":"uuid",
+  "external_identifier":"meta-page-id",
+  "country_code":"VN",
+  "language_code":"vi",
+  "keywords":[],
+  "sync_interval_hours":24
+}
+```
+
+`industry` scope는 `competitor_id` 대신 하나 이상의 `keywords`를 요구한다.
+
+### GET `/api/v1/brands/{brand_id}/collection-sources`
+
+브랜드에 설정된 수집 대상과 최근 동기화 상태를 반환한다.
+
+### PATCH `/api/v1/collection-sources/{source_id}`
+
+자동 수집 주기 또는 실행 상태를 변경한다.
+
+```json
+{"status":"paused","sync_interval_hours":24}
+```
+
+`status=active`로 재개하면 다음 scheduler tick에서 실행될 수 있도록 `next_sync_at`을 갱신한다.
+
+### POST `/api/v1/collection-sources/{source_id}/sync`
+
+```json
+{"analyze_new_creatives":true}
+```
+
+Behavior:
+1. tenant access와 source 상태 확인
+2. `market_content_sync` Job 생성
+3. Collector Worker enqueue
+4. 외부 ID 기준 Creative upsert
+5. 신규 Creative의 분석 Job enqueue
+
+Celery Beat scheduler가 active source의 `next_sync_at`을 확인해 같은 sync API와 동일한 Job 흐름을 자동 실행한다.
+
+Response `202`:
+
+```json
+{"job_id":"uuid","status":"queued"}
+```
 
 ## 7. Creative Analysis
 

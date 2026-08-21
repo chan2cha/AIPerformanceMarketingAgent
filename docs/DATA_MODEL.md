@@ -19,6 +19,7 @@ User
                          └──< Brand
                                │
                                ├──< Competitor
+                               ├──< CollectionSource
                                │
                                └──< Creative
                                       │
@@ -103,6 +104,31 @@ Index: `organization_id`
 | created_at | timestamptz | |
 
 `organization_id`를 중복 저장해 tenant query를 명확하게 한다.
+
+### collection_sources
+
+| column | type | notes |
+|---|---|---|
+| id | uuid | PK |
+| organization_id | uuid | FK, tenant scope |
+| brand_id | uuid | FK |
+| competitor_id | uuid nullable | 경쟁사 관찰이면 필수 |
+| created_by_user_id | uuid nullable | scheduler audit/requester |
+| platform | text | meta_ad_library/tiktok_creative_center |
+| scope | text | competitor/industry |
+| external_identifier | text nullable | page/account/provider identifier |
+| country_code | text | ISO 3166-1 alpha-2 |
+| language_code | text nullable | 분석 대상 언어 |
+| keywords | jsonb | 업종·현지 검색어 |
+| status | text | active/paused |
+| sync_interval_hours | integer | 1..168 |
+| next_sync_at | timestamptz nullable | scheduler 기준 시각 |
+| last_attempt_at | timestamptz nullable | 최근 실행 시도 |
+| last_sync_at | timestamptz nullable | |
+| last_error_code | text nullable | sanitized source state |
+| created_at/updated_at | timestamptz | |
+
+플랫폼 credential이나 secret은 이 테이블에 직접 저장하지 않는다. 외부 콘텐츠는 `creatives`의 `(organization_id, source, source_external_id)`로 중복을 방지한다.
 
 ### creatives
 
