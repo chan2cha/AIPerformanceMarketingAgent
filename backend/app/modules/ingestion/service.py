@@ -9,12 +9,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.ai.schemas import PROMPT_VERSION
-from app.core.errors import ResourceNotFoundError
+from app.core.errors import AppError, ResourceNotFoundError
 from app.integrations.ad_libraries.provider import (
     AdLibraryCollector,
     CollectionQuery,
     PermanentCollectorError,
     RetryableCollectorError,
+)
+from app.modules.billing.service import (
+    add_job_reservation,
+    prepare_job_reservation,
+    settle_job_reserved_credit,
 )
 from app.modules.brands.model import Brand
 from app.modules.competitors.model import Competitor
@@ -26,6 +31,16 @@ from app.modules.jobs.service import create_analysis_job, mark_job_failed
 from app.modules.users.model import User
 
 COLLECTION_JOB_TYPE = "market_content_sync"
+AUTOMATED_COLLECTION_PLATFORMS = {"meta_ad_library", "tiktok_creative_center"}
+
+
+def _ensure_automated_platform(platform: str) -> None:
+    if platform not in AUTOMATED_COLLECTION_PLATFORMS:
+        raise AppError(
+            status_code=422,
+            code="PLATFORM_UNSUPPORTED",
+            message="Meta 광고는 공식 광고 라이브러리 웹에서 직접 확인해 주세요.",
+        )
 
 
 @dataclass(frozen=True)
@@ -41,6 +56,7 @@ def create_collection_source(
     payload: CollectionSourceCreate,
     user_id: UUID,
 ) -> CollectionSource:
+    _ensure_automated_platform(payload.platform)
     competitor = None
     if payload.competitor_id is not None:
         competitor = session.scalar(
@@ -82,6 +98,8 @@ def update_collection_source(
     status: str | None,
     sync_interval_hours: int | None,
 ) -> CollectionSource:
+    if source.platform not in AUTOMATED_COLLECTION_PLATFORMS and status == "active":
+        _ensure_automated_platform(source.platform)
     now = datetime.now(UTC)
     if status is not None:
         source.status = status
@@ -103,6 +121,7 @@ def create_collection_job(
     requested_key: str,
     analyze_new_creatives: bool,
 ) -> tuple[Job, bool]:
+    _ensure_automated_platform(source.platform)
     key_digest = sha256(requested_key.encode("utf-8")).hexdigest()
     idempotency_key = f"{source.id}:{key_digest}:analyze={analyze_new_creatives}"
     existing = session.scalar(
@@ -115,6 +134,9 @@ def create_collection_job(
     if existing is not None:
         return existing, False
 
+    prepared_reservation = prepare_job_reservation(
+        session, source.organization_id, COLLECTION_JOB_TYPE
+    )
     job = Job(
         organization_id=source.organization_id,
         user_id=user.id if user else None,
@@ -124,6 +146,8 @@ def create_collection_job(
         idempotency_key=idempotency_key,
     )
     session.add(job)
+    session.flush()
+    add_job_reservation(session, job, prepared_reservation)
     try:
         session.commit()
     except IntegrityError:
@@ -163,6 +187,18 @@ def process_collection_job(
     if source is None:
         mark_job_failed(
             session, job.id, "COLLECTION_SOURCE_NOT_FOUND", "수집 소스를 찾을 수 없습니다."
+        )
+        return CollectionSyncResult(job, (), ())
+
+    if source.platform not in AUTOMATED_COLLECTION_PLATFORMS:
+        source.status = "paused"
+        source.next_sync_at = None
+        source.last_error_code = "PLATFORM_UNSUPPORTED"
+        mark_job_failed(
+            session,
+            job.id,
+            "PLATFORM_UNSUPPORTED",
+            "Meta 광고 자동 수집이 중단되었습니다. 공식 광고 라이브러리 웹에서 직접 확인해 주세요.",
         )
         return CollectionSyncResult(job, (), ())
 
@@ -252,12 +288,17 @@ def process_collection_job(
         user = session.get(User, job.user_id)
         if user is not None:
             for creative in created:
-                analysis_job, was_created = create_analysis_job(
-                    session,
-                    user,
-                    creative,
-                    f"auto:{source.id}:{creative.id}:{PROMPT_VERSION}",
-                )
+                try:
+                    analysis_job, was_created = create_analysis_job(
+                        session,
+                        user,
+                        creative,
+                        f"auto:{source.id}:{creative.id}:{PROMPT_VERSION}",
+                    )
+                except AppError as error:
+                    source.last_error_code = error.code
+                    session.commit()
+                    break
                 if was_created:
                     try:
                         dispatch_analysis(analysis_job.id)
@@ -275,6 +316,7 @@ def process_collection_job(
     job.error_code = None
     job.error_message = None
     job.finished_at = datetime.now(UTC)
+    settle_job_reserved_credit(session, job)
     session.commit()
     session.refresh(job)
     return CollectionSyncResult(
@@ -296,6 +338,7 @@ def enqueue_due_collection_sources(
             select(CollectionSource)
             .where(
                 CollectionSource.status == "active",
+                CollectionSource.platform.in_(AUTOMATED_COLLECTION_PLATFORMS),
                 CollectionSource.next_sync_at.is_not(None),
                 CollectionSource.next_sync_at <= now,
             )
@@ -307,13 +350,19 @@ def enqueue_due_collection_sources(
     for source in sources:
         scheduled_for = source.next_sync_at or now
         user = session.get(User, source.created_by_user_id) if source.created_by_user_id else None
-        job, created = create_collection_job(
-            session,
-            user,
-            source,
-            f"scheduled:{scheduled_for.isoformat()}",
-            analyze_new_creatives=True,
-        )
+        try:
+            job, created = create_collection_job(
+                session,
+                user,
+                source,
+                f"scheduled:{scheduled_for.isoformat()}",
+                analyze_new_creatives=True,
+            )
+        except AppError as error:
+            source.last_error_code = error.code
+            source.next_sync_at = now + timedelta(hours=source.sync_interval_hours)
+            session.commit()
+            continue
         source.next_sync_at = now + timedelta(hours=source.sync_interval_hours)
         if created:
             try:

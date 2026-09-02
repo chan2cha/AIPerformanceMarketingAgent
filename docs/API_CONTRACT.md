@@ -131,7 +131,7 @@ Filters 후보:
   "platform":"meta_ad_library",
   "scope":"competitor",
   "competitor_id":"uuid",
-  "external_identifier":"meta-page-id",
+  "external_identifier":"https://www.facebook.com/competitor",
   "country_code":"VN",
   "language_code":"vi",
   "keywords":[],
@@ -140,6 +140,7 @@ Filters 후보:
 ```
 
 `industry` scope는 `competitor_id` 대신 하나 이상의 `keywords`를 요구한다.
+자동 수집 source는 `meta_ad_library`, `tiktok_creative_center`를 허용한다. Meta는 Apify의 공개 광고 라이브러리 Actor, TikTok은 Creative Center Top Ads Actor로 수집하며 둘 다 Worker에서 실행한다. Meta의 `external_identifier`에는 Facebook 페이지 또는 광고 라이브러리 URL을 선택적으로 전달할 수 있다.
 
 ### GET `/api/v1/brands/{brand_id}/collection-sources`
 
@@ -240,6 +241,24 @@ Query:
   ]
 }
 ```
+
+## 9.1 Billing
+
+### GET `/api/v1/organizations/{organization_id}/billing`
+
+Organization의 `$40` 플랜 상태, 현재 결제 기간의 제공량 사용, provider credit 잔액과 secret 없는 연결 상태를 반환한다. 다른 tenant는 404를 반환한다.
+
+### POST `/api/v1/organizations/{organization_id}/billing/checkout`
+
+Owner/Admin만 호출한다. local fake provider는 즉시 활성화하고, Stripe provider는 hosted Checkout URL을 반환한다.
+
+### POST `/api/v1/organizations/{organization_id}/billing/portal`
+
+활성 Stripe customer의 hosted Billing Portal URL을 반환한다.
+
+### POST `/api/v1/billing/webhooks/stripe`
+
+사용자 인증 대신 Stripe signature와 timestamp를 검증한다. subscription event는 Organization metadata로 tenant를 식별하며 같은 결제 기간 credit grant는 idempotent하다.
 
 ## 10. Error Model
 

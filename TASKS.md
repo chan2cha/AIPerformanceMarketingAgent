@@ -222,8 +222,10 @@ Creative를 저장하고 AI 분석 Job을 요청할 수 있다.
 - [x] invalid payload test
 - [x] tenant isolation test
 - [x] job state transition/idempotency test
-- [ ] 베트남 Meta 상업 광고 production provider 확정 및 adapter
-- [ ] 베트남 TikTok 광고 production provider 확정 및 adapter
+- [x] Meta 광고 라이브러리 Apify 자동 수집 및 공식 Web 검증 경로
+- [x] 베트남 TikTok Apify Top Ads provider 후보 adapter
+- [x] Meta·TikTok 통합 수집 대상 UI와 플랫폼별 비용 상한
+- [ ] Apify 약관·예산 승인, API token 발급 및 베트남 유료 smoke
 - [x] 주기적 scheduled sync
 - [x] source pause/resume 및 sync health UI
 - [x] 브랜드 → 시장 → 자동 수집 → 분석 스텝퍼 UI
@@ -250,7 +252,49 @@ Creative를 저장하고 AI 분석 Job을 요청할 수 있다.
 - Docker production stack Web/API/Worker/Scheduler/PostgreSQL/Redis 기동, `GET /health` 200, Web smoke 성공.
 - Runtime Fake Collector smoke: 베트남 Meta 수집 소스 → sync completed → Creative 1건 → 자동 AI 분석 1건 완료.
 - Runtime scheduler smoke: due source 2건 enqueue → TikTok 베트남 Creative 1건 수집 → 자동 분석 1건 완료 → 다음 실행 시각 24시간 후 갱신.
-- 실제 Meta/TikTok 광고를 수집한 것이 아니며 production provider adapter는 미완료.
+- 기존 runtime smoke는 Fake Collector 결과다. Meta 자동 수집은 제품 범위에서 제외했으며 TikTok production adapter는 미완료.
+
+### Verification — 2026-08-24
+
+- Meta 상업 광고는 공식 광고 라이브러리 Web 수동 조사로 전환하고 TikTok만 자동 수집 대상으로 유지. `ADR-012` Accepted.
+- API의 Meta source 생성·sync 차단, scheduler 제외, 기존 queued Job 중단 정책과 화면의 경쟁사·업종 빠른 검색 링크 구현.
+- `20260824_0006` data migration으로 기존 Meta source를 삭제하지 않고 일시중지 및 수동 조사 상태로 전환.
+- Backend `pytest`: 32 passed, 1 skipped(OpenAI 유료 opt-in smoke). `ruff check .`, `alembic check` 성공.
+- Frontend `npm run lint`, `npm run typecheck`, `npm run build` 성공. Docker Web/API/Worker/Scheduler 재빌드 및 `GET /health` 200 확인.
+
+### Verification — 2026-08-24 TikTok provider candidate
+
+- TikTok 공식 Commercial Content API의 지원 국가는 EU/EEA 중심이며 베트남이 제외됨을 확인.
+- 베트남·키워드·기간 필터를 지원하는 Apify TikTok Creative Center Top Ads Actor adapter 구현. Worker-only token, Pydantic 응답 검증, 호출당 건수·USD 과금 한도, retry/error mapping 포함.
+- Backend `pytest`: 39 passed, 2 skipped(OpenAI/Apify 유료 opt-in smoke). `ruff check .` 성공.
+- Frontend `npm run lint`, `npm run typecheck`, `npm run build` 성공. API/Web smoke 200.
+- 실제 Apify 호출은 약관·예산 승인과 API token이 없어 실행하지 않음.
+
+### Verification — 2026-08-24 Meta·TikTok Apify automation
+
+- Apify 공식 유지보수 `apify/facebook-ads-scraper` 기반 Meta VN 광고 adapter 구현. Pydantic 응답 검증, 영구 Meta 광고 URL 정규화, 최소 payload 저장, 플랫폼별 결과·과금 상한 포함.
+- `20260824_0007` migration으로 수동 조사 전환 때 일시중지된 Meta source를 재활성화.
+- Meta·TikTok을 같은 자동 수집 대상 화면에서 설정하고 두 공식 라이브러리 링크를 결과 검증 경로로 제공.
+- Backend `pytest`: 45 passed, 2 skipped(OpenAI/Apify 유료 opt-in smoke). `ruff check .`, `alembic check` 성공.
+- Frontend `npm run lint`, `npm run typecheck`, `npm run build` 성공.
+- 실제 Apify 호출은 Worker token과 과금 승인이 없어 실행하지 않음.
+
+### Verification — 2026-08-26 regression
+
+- Backend Docker test image 재빌드 후 `pytest`: 45 passed, 2 skipped(OpenAI/Apify 유료 opt-in smoke).
+- Backend `ruff check .`, `alembic check`: 성공. model metadata와 migration 차이 없음.
+- Frontend `npm run lint`, `npm run typecheck`, `npm run build`: 성공.
+- Docker production stack Web/API/Worker/Scheduler/PostgreSQL/Redis 모두 healthy, `GET /health` 200.
+- `WEB_BASE_URL=http://localhost:3000 npm run test:smoke`: 성공.
+- 실제 OpenAI/Apify 호출은 API token 및 과금 승인 없이 실행하지 않음.
+
+### Verification — 2026-08-26 provider credentials
+
+- root `.env`의 OpenAI·Apify secret을 Docker Compose에 명시적으로 전달하도록 실행 명령과 test service 환경을 정리.
+- Apify Actor 인증 및 베트남 광고 1건 수신 확인. 실응답의 snake_case schema를 adapter가 안전하게 수용하도록 수정하고 회귀 테스트 추가.
+- 수정 후 Apify 재실행은 Actor가 120초 내 완료되지 않아 retryable timeout으로 종료. 반복 과금을 피하기 위해 추가 유료 호출은 중단.
+- OpenAI 결제 크레딧 추가 후 Responses API 구조화 분석 유료 smoke 성공. input/output usage와 분석 결과 schema 확인.
+- Backend `pytest`: 50 passed, 2 skipped. `ruff check .` 성공. 전체 stack 재빌드 후 API provider readiness와 health 확인.
 
 ---
 
@@ -283,12 +327,21 @@ Creative를 저장하고 AI 분석 Job을 요청할 수 있다.
 
 # Phase 8 — Credits / Billing
 
-- [ ] credit ledger
-- [ ] plan allowance
+- [x] credit ledger
+- [x] plan allowance
 - [ ] cost soft/hard limits
-- [ ] reservation/settlement
+- [x] reservation/settlement
 - [ ] overage
-- [ ] billing provider
+- [x] provider-independent billing interface와 Stripe Checkout/Webhook adapter
+
+### Verification — 2026-08-26 early implementation
+
+- 사용자 명시 지시에 따라 현재 Phase보다 먼저 `$40` Organization 구독 기반을 구현.
+- local fake checkout, production Stripe hosted Checkout/Webhook/Portal adapter, Owner/Admin 결제 권한, webhook signature 검증 포함.
+- 월 provider credit `$15`, AI 분석 200회, 자동 수집 50회, 브랜드 1개, 경쟁 브랜드 5개 제공량을 config로 분리.
+- 비용 Job 생성 전 reservation, 성공 settlement, 실패 release와 tenant별 ledger idempotency 구현.
+- 전체 backend `50 passed, 2 skipped`, Ruff, frontend lint/typecheck/build/smoke, Alembic head 및 local fake checkout 활성화·월 `$15` 지급을 검증.
+- 실제 Stripe 결제와 webhook smoke는 Stripe 계정·Price·secret 부재로 실행하지 않음.
 
 ---
 

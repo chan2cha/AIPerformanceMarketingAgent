@@ -2,6 +2,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.modules.billing.service import ensure_plan_resource_allowed
 from app.modules.brands.model import Brand
 from app.modules.competitors.model import Competitor
 from app.modules.competitors.repository import get_authorized_competitor
@@ -14,6 +15,7 @@ def create_competitor(
     brand: Brand,
     payload: CompetitorCreate,
 ) -> Competitor:
+    ensure_plan_resource_allowed(session, brand.organization_id, "competitor")
     competitor = Competitor(
         organization_id=brand.organization_id,
         brand_id=brand.id,

@@ -30,7 +30,8 @@ User
 Organization
   ├──< Job
   ├──< ApiUsage
-  └──< CreditLedger (later)
+  ├─── Subscription
+  └──< CreditLedger
 ```
 
 ## 3. Core Tables
@@ -240,6 +241,37 @@ Indexes:
 - `(organization_id, created_at)`
 - `(provider, model, created_at)`
 
+### subscriptions
+
+| column | type | notes |
+|---|---|---|
+| id | uuid | PK |
+| organization_id | uuid | FK, unique tenant subscription |
+| plan_code | text | `pilot_40` |
+| status | text | inactive/trialing/active/past_due/cancelled |
+| billing_provider | text | fake/stripe |
+| external_customer_id | text nullable | provider reference |
+| external_subscription_id | text nullable | provider reference |
+| current_period_start | timestamptz nullable | |
+| current_period_end | timestamptz nullable | |
+
+### credit_ledger
+
+| column | type | notes |
+|---|---|---|
+| id | uuid | PK |
+| organization_id | uuid | tenant scope |
+| subscription_id | uuid nullable | FK |
+| job_id | uuid nullable | FK |
+| entry_type | text | grant/reservation/settlement/release/adjustment |
+| amount_usd | numeric | signed append-only amount |
+| idempotency_key | text | unique per Organization |
+| description | text | sanitized operation description |
+| metadata | jsonb | non-secret period/cost metadata |
+| created_at | timestamptz | |
+
+잔액은 ledger 합계로 계산한다. 새 결제 기간에는 이전 미사용 credit을 adjustment로 만료한 뒤 월 credit을 grant한다.
+
 ## 4. Later Tables
 
 ### ad_accounts
@@ -275,16 +307,6 @@ Indexes:
 
 ### experiments
 추천 → 실제 집행 → 성과 피드백 루프 연결.
-
-### credit_ledger
-- organization_id
-- entry_type
-- amount
-- reference_type/reference_id
-- balance_after
-- created_at
-
-Append-only ledger를 source of truth로 두는 방향을 우선 검토한다.
 
 ## 5. Tenant Isolation Rule
 

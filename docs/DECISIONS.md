@@ -182,3 +182,135 @@ Creative 수가 증가하고 semantic similarity search가 제품 핵심 기능�
 
 - 베트남 상업 광고에 대한 공식·계약형 provider 접근이 확정될 때
 - 공용 Market Creative DB의 법적·제품 정책이 확정될 때
+
+---
+
+## ADR-012 — Meta Manual Research and TikTok Automated Collection
+
+**Status:** Superseded by ADR-014
+
+### Decision
+
+- Meta 공식 `ads_archive` API와 비공식 화면 스크래핑을 베트남 일반 상업 광고 자동 수집 경로로 사용하지 않는다.
+- Meta 광고는 Web 작업 공간에서 공식 광고 라이브러리로 이동해 사용자가 직접 조사한다. 경쟁 브랜드명과 업종을 검색어로 전달하는 빠른 링크를 제공한다.
+- 필요한 Meta 광고는 기존 Creative 직접 등록 경로로 원본 주소와 문구를 저장하고 분석한다.
+- 자동 수집 source의 신규 생성과 실행은 TikTok만 허용한다.
+- 기존 Meta source 데이터는 삭제하지 않지만 API sync와 scheduler에서 실행하지 않는다. 이미 대기 중인 Meta Job은 `PLATFORM_MANUAL_ONLY`로 종료하고 source를 일시중지한다.
+
+### Reason
+
+- Meta 공식 API는 전 세계 정치·사회 이슈 광고에는 접근 가능하지만 베트남 일반 상업 광고 전체 접근을 보장하지 않는다.
+- 제한된 공식 API 범위를 외부 계약형 수집이나 화면 스크래핑으로 우회하면 제품 안정성, 약관 검토, 데이터 품질 비용이 커진다.
+- Meta 공식 Web은 조사 출처를 명확히 유지하고, TikTok 자동화와 수동 Meta 조사의 차이를 사용자에게 투명하게 보여준다.
+- 기존 source를 보존하면 사용자 데이터 유실 없이 향후 공식 접근 범위가 바뀔 때 재검토할 수 있다.
+
+### Revisit when
+
+- Meta가 베트남 일반 상업 광고에 대한 공식적이고 안정적인 API 접근을 제공할 때
+- Meta 광고 자동 수집이 Pilot 운영에 필수라는 검증된 요구가 생길 때
+
+### References
+
+- [Meta Ads Library 소개](https://about.fb.com/news/2019/03/a-better-way-to-learn-about-ads/)
+- [Meta 공식 Ad Library API 예제 저장소](https://github.com/facebookresearch/Ad-Library-API-Script-Repository)
+- [Meta Ads Library](https://www.facebook.com/ads/library/)
+
+---
+
+## ADR-013 — Apify Candidate for Vietnam TikTok Top Ads
+
+**Status:** Proposed — adapter implemented, business approval and paid smoke pending
+
+### Decision
+
+- TikTok 공식 Commercial Content API는 베트남 광고를 지원하지 않으므로 현재 production provider로 사용하지 않는다.
+- 베트남 Creative Center Top Ads, 키워드, 업종, 기간 필터를 제공하는 Apify Actor를 첫 계약형 후보로 둔다.
+- 외부 Actor 호출은 `AdLibraryCollector` 뒤의 Worker adapter로 격리하고 API token은 Worker에만 주입한다.
+- 호출마다 최대 결과 수와 최대 USD 과금을 제한한다.
+- 외부 응답은 Pydantic으로 검증하고 영구 Creative Center URL과 분석에 필요한 최소 메타데이터만 저장한다.
+- 이 경로는 경쟁사의 전체 광고가 아닌 TikTok Creative Center의 공개 Top Ads 표본임을 UI에 표시한다.
+
+### Reason
+
+- TikTok 공식 지원 국가 목록에 베트남이 없다.
+- 후보 Actor는 `VN`, 7/30/180일, 키워드·업종 필터와 Creative Center 영구 URL을 제공한다.
+- Apify API는 bearer token, 비동기 Actor 실행, 결과 건수 및 최대 과금 제한을 제공한다.
+- Actor ID를 config로 분리해 품질이나 약관 검토 결과에 따라 다른 구현으로 교체할 수 있다.
+
+### Approval gates
+
+- Apify와 Actor 개발자의 이용약관·공개 데이터 재사용·보관 범위 승인
+- Top Ads 표본이 Pilot의 경쟁사·업종 조사 목적에 충분한지 확인
+- 예상 브랜드 수, 동기화 주기, 월 최대 예산 확정
+- Worker용 Apify API token 발급 후 VN 광고 1건 유료 smoke
+- 베트남 브랜드명과 업종 키워드 표본으로 검색 정확도 검증
+
+### References
+
+- [TikTok Commercial Content API 지원 국가](https://developers.tiktok.com/docs/en/commercial-content-api-supported-countries)
+- [TikTok Commercial Content API](https://developers.tiktok.com/products/commercial-content-api)
+- [Apify Actor API](https://docs.apify.com/api/v2)
+- [TikTok Creative Center Top Ads Actor 후보](https://apify.com/khadinakbar/tiktok-ads-scraper)
+
+---
+
+## ADR-014 — Apify Automation for Meta and TikTok
+
+**Status:** Accepted — production token and paid smoke pending
+
+### Decision
+
+- Meta와 TikTok 공개 광고 수집을 `AdLibraryCollector` 뒤의 플랫폼별 Apify Actor adapter로 자동화한다.
+- Meta는 Apify가 유지보수하는 `apify/facebook-ads-scraper`에 국가 `VN`, 활성 광고, 경쟁사명 또는 업종 키워드가 포함된 Meta 광고 라이브러리 URL을 전달한다.
+- TikTok은 Creative Center Top Ads 표본 adapter를 유지한다.
+- API token은 Worker에만 주입하고, 플랫폼별 결과 수와 USD 과금 상한을 config로 분리한다.
+- Actor 응답은 Pydantic으로 검증하고 영구 광고 URL, 문구와 최소 메타데이터만 저장한다. 임시 미디어 URL과 불필요한 원본 payload는 저장하지 않는다.
+- 공식 Meta 광고 라이브러리와 TikTok Creative Center 링크는 사용자가 수집 결과를 직접 검증하는 보조 경로로 유지한다.
+
+### Reason
+
+- Meta 공식 API만으로 베트남 일반 상업 광고 자동 수집 범위를 충족하기 어렵다.
+- Apify의 공식 유지보수 Actor는 페이지 또는 광고 라이브러리 URL, 국가·상태·미디어 필터와 결과 제한을 제공한다.
+- 외부 Actor 종속성을 adapter와 config로 격리하면 구조 변경, 품질 저하 또는 약관 변경 시 provider를 교체할 수 있다.
+
+### Operational gates
+
+- Worker용 Apify API token 발급
+- Meta와 TikTok 각각 VN 광고 1건의 유료 smoke 및 schema 확인
+- 월 예산, 실행 주기, 보관 기간 확정
+- Actor 및 Meta/TikTok 공개 데이터 이용약관 검토
+
+### References
+
+- [Apify Facebook Ads Library Scraper](https://apify.com/apify/facebook-ads-scraper)
+- [Apify Actor API](https://docs.apify.com/api/v2)
+- [Meta Ads Library](https://www.facebook.com/ads/library/)
+
+---
+
+## ADR-015 — Service-managed $40 Subscription and Provider Credentials
+
+**Status:** Proposed — implementation complete, live Stripe/Apify/OpenAI smoke pending
+
+### Decision
+
+- 초기 셀프서비스 플랜은 Organization당 월 `$40 USD`로 제공한다.
+- 고객은 Stripe hosted Checkout에서 결제하지만 Apify/OpenAI API key를 직접 입력하지 않는다.
+- Apify/OpenAI 계정과 secret은 서비스가 중앙 관리하고, 사용량·credit·Job은 Organization별로 추적한다.
+- 월 제공량은 provider credit `$15`, AI 분석 200회, 자동 수집 50회, 브랜드 1개, 경쟁 브랜드 5개로 시작한다.
+- 결제 domain은 provider-independent interface 뒤에 두고 Stripe를 첫 운영 adapter로 사용한다.
+- 비용 Job은 실행 전 credit reservation, 성공 후 settlement, 실패 시 release를 기록한다.
+- BYOK는 초기 플랜에 포함하지 않고 향후 Agency/Enterprise 요구가 확인될 때 재검토한다.
+
+### Reason
+
+- 고객에게 외부 provider 계정 발급과 secret 관리를 요구하면 onboarding과 보안 책임이 커진다.
+- Apify 기본 구독과 provider 계정을 Organization마다 중복 구매하지 않고 서비스 전체에서 공유해야 초기 단가를 통제할 수 있다.
+- 구독 매출 전체를 provider 비용으로 허용하지 않고 Organization당 변동비를 `$15` 이하로 제한해야 인프라·결제·지원 비용을 확보할 수 있다.
+
+### Operational gates
+
+- Stripe 사업자 계정, 월 `$40 USD` recurring Price, webhook signing secret 발급
+- 환불·세금·통화·연체·해지 정책 확정
+- Apify 약관·월 예산 승인 및 Meta/TikTok 유료 smoke
+- OpenAI project key 발급 및 실제 분석 비용 표본 측정

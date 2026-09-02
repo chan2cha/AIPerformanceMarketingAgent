@@ -62,7 +62,7 @@ def test_collection_sync_creates_deduplicated_creative_and_analysis_job() -> Non
                 f"/api/v1/brands/{brand['id']}/collection-sources",
                 "owner-a",
                 {
-                    "platform": "meta_ad_library",
+                    "platform": "tiktok_creative_center",
                     "scope": "competitor",
                     "competitor_id": competitor["id"],
                     "external_identifier": "meta-VN",
@@ -103,7 +103,7 @@ def test_collection_sync_creates_deduplicated_creative_and_analysis_job() -> Non
         creative = session.scalar(
             select(Creative).where(
                 Creative.brand_id == brand_id,
-                Creative.source == "meta_ad_library",
+                Creative.source == "tiktok_creative_center",
             )
         )
         assert creative is not None
@@ -143,7 +143,7 @@ def test_collection_source_rejects_cross_tenant_competitor_and_invalid_scope() -
                 f"/api/v1/brands/{brand_a['id']}/collection-sources",
                 "owner-a",
                 {
-                    "platform": "meta_ad_library",
+                    "platform": "tiktok_creative_center",
                     "scope": "competitor",
                     "competitor_id": competitor_b["id"],
                     "country_code": "VN",
@@ -215,6 +215,44 @@ def test_unavailable_collection_provider_marks_job_and_source_failed() -> None:
         assert source.last_error_code == "COLLECTOR_UNAVAILABLE"
 
 
+def test_meta_collection_source_can_be_created_scheduled_and_processed() -> None:
+    async def scenario() -> UUID:
+        async with ApiClient() as client:
+            _organization, brand, competitor = await create_brand_and_competitor(
+                client, "owner-a", "automated-meta"
+            )
+            response = await client.post(
+                f"/api/v1/brands/{brand['id']}/collection-sources",
+                "owner-a",
+                {
+                    "platform": "meta_ad_library",
+                    "scope": "competitor",
+                    "competitor_id": competitor["id"],
+                    "country_code": "VN",
+                },
+            )
+            assert response.status_code == 201
+            assert response.json()["platform"] == "meta_ad_library"
+            return UUID(response.json()["id"])
+
+    source_id = asyncio.run(scenario())
+    dispatcher = RecordingDispatcher()
+    with SessionLocal() as session:
+        job_ids = enqueue_due_collection_sources(
+            session, dispatcher.dispatch_market_content_sync
+        )
+        assert len(job_ids) == 1
+        result = process_collection_job(
+            session, job_ids[0], FakeAdLibraryCollector(), lambda _id: None
+        )
+        assert result.job.status == "completed"
+        assert len(result.created_creative_ids) == 1
+        source = session.get(CollectionSource, source_id)
+        assert source is not None
+        assert source.status == "active"
+        assert source.last_sync_at is not None
+
+
 def test_scheduler_enqueues_due_active_source_once_and_skips_paused_source() -> None:
     async def create_source() -> UUID:
         async with ApiClient() as client:
@@ -225,7 +263,7 @@ def test_scheduler_enqueues_due_active_source_once_and_skips_paused_source() -> 
                 f"/api/v1/brands/{brand['id']}/collection-sources",
                 "owner-a",
                 {
-                    "platform": "meta_ad_library",
+                    "platform": "tiktok_creative_center",
                     "scope": "competitor",
                     "competitor_id": competitor["id"],
                     "country_code": "VN",

@@ -14,6 +14,12 @@ from app.ai.provider import (
 )
 from app.ai.schemas import PROMPT_VERSION, SCHEMA_VERSION, CreativeAnalysisOutput
 from app.core.errors import ResourceNotFoundError
+from app.modules.billing.service import (
+    add_job_reservation,
+    prepare_job_reservation,
+    release_job_credit,
+    settle_job_credit,
+)
 from app.modules.creatives.model import Creative, CreativeAnalysis
 from app.modules.jobs.model import Job
 from app.modules.organizations.model import Membership
@@ -39,6 +45,9 @@ def create_analysis_job(
     if existing is not None:
         return existing, False
 
+    prepared_reservation = prepare_job_reservation(
+        session, creative.organization_id, JOB_TYPE
+    )
     job = Job(
         organization_id=creative.organization_id,
         user_id=user.id,
@@ -48,6 +57,8 @@ def create_analysis_job(
         idempotency_key=idempotency_key,
     )
     session.add(job)
+    session.flush()
+    add_job_reservation(session, job, prepared_reservation)
     try:
         session.commit()
     except IntegrityError:
@@ -85,6 +96,7 @@ def mark_job_failed(session: Session, job_id: UUID, code: str, message: str) -> 
     job.error_code = code
     job.error_message = message
     job.finished_at = datetime.now(UTC)
+    release_job_credit(session, job)
     session.commit()
 
 
@@ -176,13 +188,14 @@ def process_analysis_job(session: Session, job_id: UUID, provider: AIProvider) -
         )
         session.add(analysis)
 
-    record_provider_usage(
+    usage = record_provider_usage(
         session,
         organization_id=job.organization_id,
         user_id=job.user_id,
         job_id=job.id,
         result=result,
     )
+    settle_job_credit(session, job, usage.estimated_cost_usd)
     job.status = "completed"
     job.progress = 100
     job.error_code = None

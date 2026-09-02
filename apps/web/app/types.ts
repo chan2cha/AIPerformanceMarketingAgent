@@ -113,3 +113,28 @@ export type UsageSummary = {
   calls: number;
   by_task: { task: string; calls: number; estimated_cost_usd: string }[];
 };
+
+export type BillingSummary = {
+  status: "inactive" | "trialing" | "active" | "past_due" | "cancelled";
+  plan: {
+    code: string;
+    name: string;
+    monthly_price_usd: string;
+    monthly_credit_usd: string;
+    analysis_limit: number;
+    collection_run_limit: number;
+    brand_limit: number;
+    competitor_limit: number;
+  };
+  allowance: {
+    credit_remaining_usd: string;
+    analysis_used: number;
+    analysis_limit: number;
+    collection_runs_used: number;
+    collection_run_limit: number;
+  };
+  current_period_start: string | null;
+  current_period_end: string | null;
+  provider_readiness: { billing: boolean; apify: boolean; openai: boolean };
+  enforcement_enabled: boolean;
+};

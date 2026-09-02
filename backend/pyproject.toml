@@ -11,6 +11,7 @@ dependencies = [
   "alembic>=1.14,<2",
   "celery[redis]>=5.4,<6",
   "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
   "openai>=2.0,<3",
   "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.7,<3",
@@ -21,7 +22,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "httpx>=0.28,<1",
   "pytest>=8.3,<9",
   "ruff>=0.9,<1",
 ]
@@ -31,6 +31,7 @@ addopts = "-q"
 testpaths = ["tests"]
 markers = [
   "openai_smoke: opt-in test that makes a billable OpenAI API request",
+  "apify_smoke: opt-in test that makes a billable Apify Actor run",
 ]
 
 [tool.ruff]

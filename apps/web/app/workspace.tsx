@@ -2,11 +2,12 @@
 
 import { FormEvent, ReactNode, useRef, useState } from "react";
 import { ApiError, apiRequest } from "./api";
-import type { Brand, CollectionSource, Competitor, Creative, CreativeDetail, Job, Me, Organization, UsageSummary } from "./types";
+import type { BillingSummary, Brand, CollectionSource, Competitor, Creative, CreativeDetail, Job, Me, Organization, UsageSummary } from "./types";
 
 type LoadState = "idle" | "loading" | "ready";
-type WorkspaceStep = "brand" | "market" | "collection" | "analysis";
+type WorkspaceStep = "billing" | "brand" | "market" | "collection" | "analysis";
 const steps: { id: WorkspaceStep; label: string; description: string }[] = [
+  { id: "billing", label: "플랜", description: "결제와 제공량" },
   { id: "brand", label: "브랜드", description: "분석 기준 만들기" },
   { id: "market", label: "시장", description: "경쟁사 정하기" },
   { id: "collection", label: "자동 수집", description: "광고 채널 연결" },
@@ -20,6 +21,15 @@ const collectionStatusLabel = { queued: "수집 준비 중", processing: "광고
 const value = (form: FormData, key: string) => String(form.get(key) ?? "").trim();
 const date = (input: string) => new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric" }).format(new Date(input));
 const message = (error: unknown) => error instanceof ApiError ? error.message : "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+const metaLibraryUrl = (query?: string | null) => {
+  const params = new URLSearchParams({ active_status: "active", ad_type: "all", country: "VN", media_type: "all" });
+  if (query?.trim()) {
+    params.set("q", query.trim());
+    params.set("search_type", "keyword_unordered");
+  }
+  return `https://www.facebook.com/ads/library/?${params.toString()}`;
+};
+const tiktokLibraryUrl = "https://ads.tiktok.com/business/creativecenter/inspiration/topads/pc/en?region=VN";
 
 export function MarketingWorkspace({ initialApiHealthy }: { initialApiHealthy: boolean }) {
   const [subjectInput, setSubjectInput] = useState("demo-owner");
@@ -34,6 +44,7 @@ export function MarketingWorkspace({ initialApiHealthy }: { initialApiHealthy: b
   const [creatives, setCreatives] = useState<Creative[]>([]);
   const [creative, setCreative] = useState<CreativeDetail | null>(null);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [billing, setBilling] = useState<BillingSummary | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [collectionJob, setCollectionJob] = useState<Job | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("idle");
@@ -41,7 +52,7 @@ export function MarketingWorkspace({ initialApiHealthy }: { initialApiHealthy: b
   const [openForm, setOpenForm] = useState<"org" | "brand" | "competitor" | "creative" | "source" | null>(null);
   const [ownershipFilter, setOwnershipFilter] = useState("");
   const [mediaFilter, setMediaFilter] = useState("");
-  const [activeStep, setActiveStep] = useState<WorkspaceStep>("brand");
+  const [activeStep, setActiveStep] = useState<WorkspaceStep>("billing");
   const tenantVersion = useRef(0);
 
   const activeBrand = brands.find((item) => item.id === brandId);
@@ -49,6 +60,11 @@ export function MarketingWorkspace({ initialApiHealthy }: { initialApiHealthy: b
   async function fetchUsage(user: string, orgId: string, version: number) {
     const result = await apiRequest<UsageSummary>(`/api/v1/organizations/${orgId}/usage`, user);
     if (tenantVersion.current === version) setUsage(result);
+  }
+
+  async function fetchBilling(user: string, orgId: string, version: number) {
+    const result = await apiRequest<BillingSummary>(`/api/v1/organizations/${orgId}/billing`, user);
+    if (tenantVersion.current === version) setBilling(result);
   }
 
   async function loadBrand(user: string, nextId: string, version: number, ownership = ownershipFilter, media = mediaFilter) {
@@ -75,16 +91,17 @@ export function MarketingWorkspace({ initialApiHealthy }: { initialApiHealthy: b
   async function loadOrganization(user: string, orgId: string) {
     const version = ++tenantVersion.current;
     // Clear tenant-owned state before issuing requests so stale data is never rendered.
-    setOrganizationId(orgId); setBrandId(""); setBrands([]); setCompetitors([]); setCollectionSources([]); setCreatives([]); setCreative(null); setUsage(null); setJob(null); setCollectionJob(null); setActiveStep("brand"); setError("");
+    setOrganizationId(orgId); setBrandId(""); setBrands([]); setCompetitors([]); setCollectionSources([]); setCreatives([]); setCreative(null); setUsage(null); setBilling(null); setJob(null); setCollectionJob(null); setActiveStep("billing"); setError("");
     if (!orgId) return;
     setLoadState("loading");
     try {
-      const [items] = await Promise.all([
+      const [items, billingSummary] = await Promise.all([
         apiRequest<Brand[]>(`/api/v1/organizations/${orgId}/brands`, user),
+        apiRequest<BillingSummary>(`/api/v1/organizations/${orgId}/billing`, user),
         fetchUsage(user, orgId, version),
       ]);
       if (tenantVersion.current !== version) return;
-      setBrands(items); setLoadState("ready"); setActiveStep(items.length ? "market" : "brand");
+      setBrands(items); setBilling(billingSummary); setLoadState("ready"); setActiveStep("billing");
       if (items[0]) await loadBrand(user, items[0].id, version);
     } catch (caught) {
       if (tenantVersion.current === version) { setError(message(caught)); setLoadState("ready"); }
@@ -103,7 +120,7 @@ export function MarketingWorkspace({ initialApiHealthy }: { initialApiHealthy: b
 
   function logout() {
     ++tenantVersion.current;
-    setSubject(null); setMe(null); setOrganizations([]); setOrganizationId(""); setBrands([]); setBrandId(""); setCompetitors([]); setCollectionSources([]); setCreatives([]); setCreative(null); setUsage(null); setJob(null); setCollectionJob(null); setActiveStep("brand"); setError("");
+    setSubject(null); setMe(null); setOrganizations([]); setOrganizationId(""); setBrands([]); setBrandId(""); setCompetitors([]); setCollectionSources([]); setCreatives([]); setCreative(null); setUsage(null); setBilling(null); setJob(null); setCollectionJob(null); setActiveStep("billing"); setError("");
   }
 
   async function createOrganization(event: FormEvent<HTMLFormElement>) {
@@ -113,6 +130,20 @@ export function MarketingWorkspace({ initialApiHealthy }: { initialApiHealthy: b
       const item = { ...created, role: "owner" as const };
       setOrganizations((current) => [...current, item]); setOpenForm(null); await loadOrganization(subject, item.id);
     } catch (caught) { setError(message(caught)); }
+  }
+
+  async function startCheckout() {
+    if (!subject || !organizationId) return;
+    setLoadState("loading"); setError("");
+    try {
+      const result = await apiRequest<{ status: "inactive" | "active"; checkout_url: string | null }>(`/api/v1/organizations/${organizationId}/billing/checkout`, subject, { method: "POST", body: JSON.stringify({}) });
+      if (result.checkout_url) {
+        window.location.assign(result.checkout_url);
+        return;
+      }
+      await fetchBilling(subject, organizationId, tenantVersion.current);
+      setActiveStep("brand"); setLoadState("ready");
+    } catch (caught) { setError(message(caught)); setLoadState("ready"); }
   }
 
   async function createBrand(event: FormEvent<HTMLFormElement>) {
@@ -155,7 +186,7 @@ export function MarketingWorkspace({ initialApiHealthy }: { initialApiHealthy: b
         if (attempt) await new Promise((resolve) => setTimeout(resolve, 900));
         if (tenantVersion.current !== version) return;
         const current = await apiRequest<Job>(`/api/v1/jobs/${accepted.job_id}`, subject); setCollectionJob(current);
-        if (current.status === "completed") { await loadBrand(subject, brandId, version); return; }
+        if (current.status === "completed") { await Promise.all([loadBrand(subject, brandId, version), fetchBilling(subject, organizationId, version)]); return; }
         if (current.status === "failed" || current.status === "cancelled") return;
       }
       setError("광고 수집 시간이 예상보다 길어지고 있습니다. 잠시 후 다시 확인해 주세요.");
@@ -188,7 +219,7 @@ export function MarketingWorkspace({ initialApiHealthy }: { initialApiHealthy: b
         if (attempt) await new Promise((resolve) => setTimeout(resolve, 900));
         if (tenantVersion.current !== version) return;
         const current = await apiRequest<Job>(`/api/v1/jobs/${accepted.job_id}`, subject); setJob(current);
-        if (current.status === "completed") { await Promise.all([selectCreative(creative.id), fetchUsage(subject, organizationId, version)]); return; }
+        if (current.status === "completed") { await Promise.all([selectCreative(creative.id), fetchUsage(subject, organizationId, version), fetchBilling(subject, organizationId, version)]); return; }
         if (current.status === "failed" || current.status === "cancelled") return;
       }
       setError("분석 시간이 예상보다 길어지고 있습니다. 잠시 후 다시 확인해 주세요.");
@@ -211,6 +242,8 @@ export function MarketingWorkspace({ initialApiHealthy }: { initialApiHealthy: b
   const analysis = creative?.analyses[0];
   const isAnalyzing = job?.status === "queued" || job?.status === "processing";
   const canLeaveBrandStep = Boolean(brandId);
+  const billingActive = billing?.status === "active" || billing?.status === "trialing";
+  const billingAllowsUse = Boolean(organizationId) && (billingActive || billing?.enforcement_enabled === false);
 
   return (
     <main className="guided-shell">
@@ -231,8 +264,8 @@ export function MarketingWorkspace({ initialApiHealthy }: { initialApiHealthy: b
 
       <nav className="stepper" aria-label="광고 분석 설정 단계">
         {steps.map((item, index) => {
-          const disabled = item.id !== "brand" && !canLeaveBrandStep;
-          const completed = item.id === "brand" ? canLeaveBrandStep : item.id === "market" ? competitors.length > 0 : item.id === "collection" ? collectionSources.length > 0 : creatives.length > 0;
+          const disabled = item.id === "billing" ? false : item.id === "brand" ? !billingAllowsUse : !canLeaveBrandStep;
+          const completed = item.id === "billing" ? billingActive : item.id === "brand" ? canLeaveBrandStep : item.id === "market" ? competitors.length > 0 : item.id === "collection" ? collectionSources.length > 0 : creatives.length > 0;
           return (
             <button
               key={item.id}
@@ -251,9 +284,50 @@ export function MarketingWorkspace({ initialApiHealthy }: { initialApiHealthy: b
       {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")}>닫기</button></div>}
 
       <section className="step-screen" key={activeStep}>
+        {activeStep === "billing" && (
+          <>
+            <ScreenHeading number="01" eyebrow="플랜과 결제" title="주 1회 시장 분석을 바로 시작하세요" description="결제 후 브랜드와 경쟁사를 설정하면 Meta·TikTok 수집과 신규 광고 AI 분석을 정해진 제공량 안에서 자동 실행합니다." />
+            {!organizationId ? (
+              <section className="billing-empty">
+                <div><p className="eyebrow">먼저 필요한 정보</p><h3>결제할 회사 또는 팀을 만들어 주세요</h3><p>구독과 사용량은 회사 단위로 분리됩니다.</p></div>
+                <button className="primary-action" onClick={() => setOpenForm(openForm === "org" ? null : "org")}>회사 / 팀 만들기</button>
+                {openForm === "org" && <InlineForm onSubmit={createOrganization} fields={[{ name: "name", placeholder: "회사 또는 팀 이름" }]} />}
+              </section>
+            ) : billing && (
+              <div className="billing-layout">
+                <section className="plan-statement">
+                  <div className="plan-price"><span>월</span><strong>${Number(billing.plan.monthly_price_usd).toFixed(0)}</strong><small>USD · 매월 결제</small></div>
+                  <div className="plan-copy"><p className="eyebrow">{billing.plan.name}</p><h2>수집과 분석 비용을 한 플랜에서 관리합니다.</h2><p>API key를 직접 입력할 필요가 없습니다. 결제 후 브랜드·경쟁사·검색어만 설정하세요.</p></div>
+                  <div className={`subscription-state state-${billing.status}`}><span />{billingActive ? "구독 활성" : billing.status === "past_due" ? "결제 확인 필요" : "결제 전"}</div>
+                </section>
+
+                <section className="allowance-table" aria-label="월 제공량">
+                  <div><span>브랜드</span><strong>{billing.plan.brand_limit}개</strong><small>조직당</small></div>
+                  <div><span>경쟁 브랜드</span><strong>{billing.plan.competitor_limit}개</strong><small>브랜드 기준</small></div>
+                  <div><span>자동 수집</span><strong>{billing.allowance.collection_runs_used} / {billing.allowance.collection_run_limit}</strong><small>이번 결제 기간</small></div>
+                  <div><span>AI 분석</span><strong>{billing.allowance.analysis_used} / {billing.allowance.analysis_limit}</strong><small>신규 소재만 차감</small></div>
+                  <div><span>Provider credit</span><strong>${Number(billing.allowance.credit_remaining_usd).toFixed(2)}</strong><small>${Number(billing.plan.monthly_credit_usd).toFixed(0)} 포함</small></div>
+                </section>
+
+                <section className="provider-status">
+                  <div><p className="eyebrow">서비스 연결 상태</p><h3>키는 운영 환경에서만 관리합니다</h3></div>
+                  <ProviderState label="결제" ready={billing.provider_readiness.billing} />
+                  <ProviderState label="광고 수집" ready={billing.provider_readiness.apify} />
+                  <ProviderState label="AI 분석" ready={billing.provider_readiness.openai} />
+                </section>
+
+                <footer className="billing-actions">
+                  <p>{billingActive ? "결제가 확인되었습니다. 브랜드 정보를 설정해 주세요." : billing.provider_readiness.billing ? "결제 화면에서 카드를 등록하면 즉시 활성화됩니다." : "운영자가 결제 연결을 완료한 뒤 구독할 수 있습니다."}</p>
+                  {billingActive ? <button className="primary-action" onClick={() => setActiveStep("brand")}>브랜드 설정 시작 →</button> : <button className="primary-action" disabled={!billing.provider_readiness.billing || loadState === "loading"} onClick={() => void startCheckout()}>{loadState === "loading" ? "결제 준비 중…" : "$40 플랜 결제하기"}</button>}
+                </footer>
+              </div>
+            )}
+          </>
+        )}
+
         {activeStep === "brand" && (
           <>
-            <ScreenHeading number="01" eyebrow="시작점" title="분석할 브랜드를 알려주세요" description="회사와 브랜드를 한 번만 정해 두면 이후 경쟁 광고 수집과 AI 분석의 기준으로 사용합니다." />
+            <ScreenHeading number="02" eyebrow="시작점" title="분석할 브랜드를 알려주세요" description="회사와 브랜드를 한 번만 정해 두면 이후 경쟁 광고 수집과 AI 분석의 기준으로 사용합니다." />
             <div className="setup-layout">
               <section className="focus-panel">
                 <div className="panel-heading"><div><p className="eyebrow">회사 / 팀</p><h3>작업 공간 선택</h3></div><button className="text-action" onClick={() => setOpenForm(openForm === "org" ? null : "org")}>+ 새 회사/팀</button></div>
@@ -280,11 +354,11 @@ export function MarketingWorkspace({ initialApiHealthy }: { initialApiHealthy: b
 
         {activeStep === "market" && (
           <>
-            <ScreenHeading number="02" eyebrow={activeBrand?.name || "브랜드"} title="비교할 시장을 좁혀주세요" description="베트남에서 함께 살펴볼 경쟁 브랜드를 등록하세요. 업종 키워드 수집은 다음 단계에서 추가할 수 있습니다." />
+            <ScreenHeading number="03" eyebrow={activeBrand?.name || "브랜드"} title="비교할 시장을 좁혀주세요" description="베트남에서 함께 살펴볼 경쟁 브랜드를 등록하세요. 업종 키워드 수집은 다음 단계에서 추가할 수 있습니다." />
             <section className="focus-panel narrow-panel">
               <div className="panel-heading"><div><p className="eyebrow">경쟁 브랜드</p><h3>{competitors.length ? `${competitors.length}개 브랜드를 비교 중` : "아직 등록된 경쟁 브랜드가 없습니다"}</h3></div><button className="text-action" onClick={() => setOpenForm(openForm === "competitor" ? null : "competitor")}>+ 경쟁 브랜드</button></div>
               {openForm === "competitor" && <InlineForm onSubmit={createCompetitor} fields={[{ name: "name", placeholder: "경쟁 브랜드 이름" }, { name: "website", placeholder: "웹사이트 주소 (선택)" }]} />}
-              {competitors.length === 0 ? <Empty text="경쟁사를 등록하면 다음 단계에서 Meta와 TikTok의 해당 브랜드 광고를 수집 대상으로 연결할 수 있습니다. 업종만으로 시작해도 됩니다." /> : <div className="market-list">{competitors.map((item, index) => <div key={item.id}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{item.name}</strong><small>{item.website || "웹사이트 미입력"}</small></div><i>비교 대상</i></div>)}</div>}
+              {competitors.length === 0 ? <Empty text="경쟁사를 등록하면 다음 단계에서 Meta 광고를 빠르게 찾아보고 TikTok 자동 수집 대상으로 연결할 수 있습니다. 업종만으로 시작해도 됩니다." /> : <div className="market-list">{competitors.map((item, index) => <div key={item.id}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{item.name}</strong><small>{item.website || "웹사이트 미입력"}</small></div><i>비교 대상</i></div>)}</div>}
             </section>
             <StepActions previousLabel="브랜드로 돌아가기" onPrevious={() => setActiveStep("brand")} nextLabel="자동 수집 설정하기" onNext={() => setActiveStep("collection")} />
           </>
@@ -292,27 +366,50 @@ export function MarketingWorkspace({ initialApiHealthy }: { initialApiHealthy: b
 
         {activeStep === "collection" && (
           <>
-            <ScreenHeading number="03" eyebrow="자동 시장 조사" title="광고가 들어오는 길을 설정하세요" description="경쟁 브랜드 또는 업종 키워드를 채널과 연결하면 주기적으로 새 광고를 찾아 자동 분석합니다." />
-            <section className="focus-panel narrow-panel">
-              <div className="panel-heading"><div><p className="eyebrow">수집 채널</p><h3>{collectionSources.length ? `${collectionSources.length}개 자동 수집 실행 중` : "수집 대상을 추가해 주세요"}</h3></div><button className="text-action" onClick={() => setOpenForm(openForm === "source" ? null : "source")}>+ 수집 대상</button></div>
+            <ScreenHeading number="04" eyebrow="시장 광고 조사" title="Meta와 TikTok 광고를 자동으로 모으세요" description="경쟁 브랜드나 업종 키워드를 한 번 설정하면 베트남 공개 광고를 주기적으로 수집합니다. 공식 라이브러리에서 원본도 확인할 수 있습니다." />
+            <div className="collection-workflow">
+              <section className="collection-channel" aria-labelledby="meta-channel-title">
+                <div className="channel-label"><span>META</span><small>자동 수집</small></div>
+                <div className="channel-copy">
+                  <p className="eyebrow">Facebook · Instagram 공개 광고</p>
+                  <h3 id="meta-channel-title">경쟁사 광고와 문구를 수집합니다</h3>
+                  <p>Apify를 통해 베트남의 활성 광고를 수집합니다. 공식 API가 아닌 공개 웹 데이터이므로 결과 누락이나 구조 변경 가능성이 있습니다.</p>
+                  {(competitors.length > 0 || activeBrand?.industry) && <div className="meta-quick-links" aria-label="Meta 광고 빠른 검색">
+                    {competitors.map((item) => <a key={item.id} href={metaLibraryUrl(item.name)} target="_blank" rel="noreferrer">{item.name} ↗</a>)}
+                    {activeBrand?.industry && <a href={metaLibraryUrl(activeBrand.industry)} target="_blank" rel="noreferrer">{activeBrand.industry} 업종 ↗</a>}
+                  </div>}
+                </div>
+                <a className="library-action" href={metaLibraryUrl()} target="_blank" rel="noreferrer">공식 라이브러리 <span>↗</span></a>
+              </section>
+
+              <section className="collection-channel" aria-labelledby="tiktok-channel-title">
+                <div className="channel-label"><span>TIKTOK</span><small>자동 수집</small></div>
+                <div className="channel-copy"><p className="eyebrow">Creative Center · Top Ads</p><h3 id="tiktok-channel-title">성과가 좋은 공개 광고 표본을 수집합니다</h3><p>TikTok Creative Center가 공개한 베트남 인기 광고 표본입니다. 특정 경쟁사의 전체 광고 목록은 아닙니다.</p></div>
+                <a className="library-action secondary" href={tiktokLibraryUrl} target="_blank" rel="noreferrer">Creative Center <span>↗</span></a>
+              </section>
+
+              <section className="focus-panel collection-source-panel">
+              <div className="panel-heading"><div><p className="eyebrow">자동 수집 대상</p><h3>{collectionSources.length ? `${collectionSources.length}개 수집 설정됨` : "첫 수집 대상을 추가해 주세요"}</h3></div><button className="text-action" onClick={() => setOpenForm(openForm === "source" ? null : "source")}>+ 수집 대상</button></div>
+              <p className="collection-scope-note">플랫폼, 경쟁 브랜드 또는 업종 키워드, 수집 주기를 설정합니다. 새 광고만 중복 없이 저장하고 분석 단계로 보냅니다.</p>
               {openForm === "source" && <CollectionSourceForm competitors={competitors} onSubmit={createCollectionSource} onCancel={() => setOpenForm(null)} />}
-              {collectionSources.length === 0 ? <Empty text="Meta 광고 라이브러리 또는 TikTok 광고 라이브러리에서 찾을 경쟁 브랜드·업종 키워드를 설정하세요." /> : <div className="collection-list">{collectionSources.map((source) => <div className={`collection-row ${source.status === "paused" ? "paused" : ""}`} key={source.id}><span className="source-mark">{source.platform === "meta_ad_library" ? "M" : "T"}</span><div><strong>{platformLabel[source.platform]}</strong><small>{source.scope === "competitor" ? competitors.find((item) => item.id === source.competitor_id)?.name || "경쟁 브랜드" : source.keywords.join(", ")} · {source.country_code} · {source.sync_interval_hours === 24 ? "매일" : `${source.sync_interval_hours}시간마다`}</small>{source.last_error_code && <small className="source-error">최근 수집 오류 · {source.last_error_code}</small>}</div><span>{source.status === "paused" ? "일시중지" : source.last_sync_at ? `최근 ${date(source.last_sync_at)}` : "첫 수집 대기"}</span><div className="collection-actions"><button disabled={source.status === "paused" || collectionJob?.status === "queued" || collectionJob?.status === "processing"} onClick={() => void syncCollectionSource(source.id)}>지금 수집</button><button className="quiet" onClick={() => void updateCollectionSource(source, source.status === "active" ? "paused" : "active")}>{source.status === "active" ? "중지" : "재개"}</button></div></div>)}</div>}
+              {collectionSources.length === 0 ? <Empty text="Meta 또는 TikTok에서 찾을 경쟁 브랜드나 베트남 업종 키워드를 설정하세요." /> : <div className="collection-list">{collectionSources.map((source) => <div className={`collection-row ${source.status === "paused" ? "paused" : ""}`} key={source.id}><span className={`source-mark source-${source.platform}`}>{source.platform === "meta_ad_library" ? "M" : "T"}</span><div><strong>{platformLabel[source.platform]}</strong><small>{source.scope === "competitor" ? competitors.find((item) => item.id === source.competitor_id)?.name || "경쟁 브랜드" : source.keywords.join(", ")} · {source.country_code} · {source.sync_interval_hours === 24 ? "매일" : `${source.sync_interval_hours}시간마다`}</small>{source.last_error_code && <small className="source-error">최근 수집 오류 · {source.last_error_code}</small>}</div><span>{source.status === "paused" ? "일시중지" : source.last_sync_at ? `최근 ${date(source.last_sync_at)}` : "첫 수집 대기"}</span><div className="collection-actions"><button disabled={source.status === "paused" || collectionJob?.status === "queued" || collectionJob?.status === "processing"} onClick={() => void syncCollectionSource(source.id)}>지금 수집</button><button className="quiet" onClick={() => void updateCollectionSource(source, source.status === "active" ? "paused" : "active")}>{source.status === "active" ? "중지" : "재개"}</button></div></div>)}</div>}
               {collectionJob && <p className={`collection-status status-${collectionJob.status}`}>{collectionStatusLabel[collectionJob.status]}{collectionJob.status === "completed" ? " · 새 광고 분석이 시작되었습니다." : ""}</p>}
-            </section>
+              </section>
+            </div>
             <StepActions previousLabel="시장 설정으로" onPrevious={() => setActiveStep("market")} nextLabel="수집 광고 분석하기" onNext={() => setActiveStep("analysis")} />
           </>
         )}
 
         {activeStep === "analysis" && (
           <>
-            <ScreenHeading number="04" eyebrow={activeBrand?.name || "광고 분석"} title="수집된 광고에서 패턴을 찾으세요" description="광고를 선택하면 문구와 AI 분석 결과를 나란히 확인할 수 있습니다." aside={<div className="usage-chip"><span>AI 사용 현황</span><strong>분석 {usage?.calls ?? 0}회</strong><small>예상 비용 ${Number(usage?.estimated_cost_usd ?? 0).toFixed(5)}</small></div>} />
+            <ScreenHeading number="05" eyebrow={activeBrand?.name || "광고 분석"} title="수집된 광고에서 패턴을 찾으세요" description="광고를 선택하면 문구와 AI 분석 결과를 나란히 확인할 수 있습니다." aside={<div className="usage-chip"><span>AI 사용 현황</span><strong>분석 {billing?.allowance.analysis_used ?? usage?.calls ?? 0}회</strong><small>남은 credit ${Number(billing?.allowance.credit_remaining_usd ?? 0).toFixed(2)}</small></div>} />
             <div className="analysis-toolbar"><div className="filters"><select aria-label="광고 출처 필터" value={ownershipFilter} onChange={(event) => { setOwnershipFilter(event.target.value); void refresh(event.target.value, mediaFilter); }}><option value="">모든 광고 출처</option><option value="own">우리 브랜드 광고</option><option value="competitor">경쟁 브랜드 광고</option><option value="market">기타 시장 사례</option></select><select aria-label="광고 형식 필터" value={mediaFilter} onChange={(event) => { setMediaFilter(event.target.value); void refresh(ownershipFilter, event.target.value); }}><option value="">모든 광고 형식</option><option value="image">이미지</option><option value="video">영상</option><option value="carousel">여러 장 이미지</option><option value="text">텍스트</option></select></div><button className="secondary-action" onClick={() => setOpenForm(openForm === "creative" ? null : "creative")}>+ 직접 추가</button></div>
             {openForm === "creative" && <CreativeForm competitors={competitors} onSubmit={createCreative} onCancel={() => setOpenForm(null)} />}
             <div className="analysis-workbench">
               <section className="creative-library">
                 <div className="library-meta"><span>수집된 광고</span><strong>{creatives.length}개</strong></div>
                 {loadState === "loading" && <LoadingRows />}
-                {loadState !== "loading" && creatives.length === 0 && <Empty text={collectionSources.length ? "첫 수집을 실행하면 새 광고가 이곳에 표시됩니다." : "자동 수집을 먼저 설정하거나 광고를 직접 추가하세요."} />}
+                {loadState !== "loading" && creatives.length === 0 && <Empty text={collectionSources.length ? "첫 자동 수집을 실행하면 새 광고가 이곳에 표시됩니다." : "Meta 또는 TikTok 자동 수집을 설정하거나 광고를 직접 추가하세요."} />}
                 <div className="creative-list">{creatives.map((item, index) => <button key={item.id} className={creative?.id === item.id ? "creative-row selected" : "creative-row"} onClick={() => void selectCreative(item.id)}><span className={`media-tile media-${item.media_type}`}>{mediaLabel[item.media_type].slice(0, 2)}</span><span className="creative-copy"><strong>{item.title || "제목 없는 광고 소재"}</strong><small>{item.body || item.source_url || "입력한 광고 문구 없음"}</small></span><span className="creative-tags"><i>{ownershipLabel[item.ownership_type]}</i><i>{mediaLabel[item.media_type]}</i></span><span className="creative-date">{date(item.created_at)}<small>#{String(index + 1).padStart(2, "0")}</small></span></button>)}</div>
               </section>
               <aside className="inspector-pane">
@@ -346,9 +443,11 @@ function CreativeForm({ competitors, onSubmit, onCancel }: { competitors: Compet
 
 function CollectionSourceForm({ competitors, onSubmit, onCancel }: { competitors: Competitor[]; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onCancel: () => void }) {
   const [scope, setScope] = useState(competitors.length ? "competitor" : "industry");
-  return <form className="creative-form source-form" onSubmit={onSubmit}><div className="form-heading"><div><p className="eyebrow">새 수집 대상</p><h3>어떤 광고를 찾아볼까요?</h3></div><button type="button" onClick={onCancel}>닫기</button></div><div className="form-grid"><label>광고 채널<select name="platform"><option value="meta_ad_library">Meta 광고 라이브러리</option><option value="tiktok_creative_center">TikTok 광고 라이브러리</option></select></label><label>찾는 기준<select name="scope" value={scope} onChange={(event) => setScope(event.target.value)}><option value="competitor">경쟁 브랜드</option><option value="industry">업종·키워드</option></select></label>{scope === "competitor" ? <label className="wide">경쟁 브랜드<select name="competitor_id" required><option value="">선택하세요</option>{competitors.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : <label className="wide">검색어<input name="keywords" required placeholder="예: 스킨케어, 선크림, kem chống nắng" /></label>}<label>대상 국가<input name="country_code" defaultValue="VN" maxLength={2} required /></label><label>광고 언어<input name="language_code" defaultValue="vi" /></label><label>자동 수집 주기<select name="sync_interval_hours" defaultValue="24"><option value="6">6시간마다</option><option value="12">12시간마다</option><option value="24">매일</option><option value="72">3일마다</option><option value="168">매주</option></select></label><label className="wide">플랫폼 식별자<input name="external_identifier" placeholder="페이지 ID, 계정명 등 (선택 사항)" /></label></div><button className="primary-action">수집 대상 저장</button></form>;
+  const [platform, setPlatform] = useState("meta_ad_library");
+  return <form className="creative-form source-form" onSubmit={onSubmit}><div className="form-heading"><div><p className="eyebrow">새 자동 수집 대상</p><h3>어떤 광고를 자동으로 찾아볼까요?</h3></div><button type="button" onClick={onCancel}>닫기</button></div><div className="form-grid"><label>광고 플랫폼<select name="platform" value={platform} onChange={(event) => setPlatform(event.target.value)}><option value="meta_ad_library">Meta 광고 라이브러리</option><option value="tiktok_creative_center">TikTok Creative Center</option></select></label><label>찾는 기준<select name="scope" value={scope} onChange={(event) => setScope(event.target.value)}><option value="competitor">경쟁 브랜드</option><option value="industry">업종·키워드</option></select></label>{scope === "competitor" ? <label className="wide">경쟁 브랜드<select name="competitor_id" required><option value="">선택하세요</option>{competitors.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label> : <label className="wide">검색어<input name="keywords" required placeholder="예: 스킨케어, 선크림, kem chống nắng" /></label>}<label>대상 국가<input name="country_code" defaultValue="VN" maxLength={2} required /></label><label>광고 언어<input name="language_code" defaultValue="vi" /></label><label>자동 수집 주기<select name="sync_interval_hours" defaultValue="24"><option value="6">6시간마다</option><option value="12">12시간마다</option><option value="24">매일</option><option value="72">3일마다</option><option value="168">매주</option></select></label><label className="wide">{platform === "meta_ad_library" ? "Facebook 페이지 또는 광고 라이브러리 주소" : "TikTok 계정명 또는 식별자"}<input name="external_identifier" placeholder={platform === "meta_ad_library" ? "https://www.facebook.com/brand (선택 사항)" : "예: @competitor (선택 사항)"} /></label></div><button className="primary-action">자동 수집 대상 저장</button></form>;
 }
 
+function ProviderState({ label, ready }: { label: string; ready: boolean }) { return <div className={ready ? "ready" : "waiting"}><span>{label}</span><strong>{ready ? "연결됨" : "운영 설정 전"}</strong></div>; }
 function Empty({ text, compact = false }: { text: string; compact?: boolean }) { return <div className={compact ? "empty-state compact" : "empty-state"}><span>○</span><p>{text}</p></div>; }
 function LoadingRows() { return <div className="loading-rows" aria-label="광고 소재 불러오는 중">{[1, 2, 3].map((item) => <div key={item}><span /><i /></div>)}</div>; }
 function AnalysisLine({ label, value }: { label: string; value: string | null }) { return <div className="analysis-line"><span>{label}</span><p>{value || "분석 결과 없음"}</p></div>; }

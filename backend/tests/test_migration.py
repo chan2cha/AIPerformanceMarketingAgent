@@ -12,12 +12,14 @@ def test_clean_database_is_at_alembic_head() -> None:
         "brands",
         "competitors",
         "collection_sources",
+        "credit_ledger",
         "creative_analyses",
         "creative_assets",
         "creatives",
         "jobs",
         "memberships",
         "organizations",
+        "subscriptions",
         "users",
     }
     assert expected_tables.issubset(set(inspect(engine).get_table_names()))
@@ -27,4 +29,4 @@ def test_clean_database_is_at_alembic_head() -> None:
     with engine.connect() as connection:
         current_revision = MigrationContext.configure(connection).get_current_revision()
 
-    assert current_revision == script.get_current_head() == "20260821_0005"
+    assert current_revision == script.get_current_head() == "20260826_0008"

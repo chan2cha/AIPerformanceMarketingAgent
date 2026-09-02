@@ -3,6 +3,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.modules.auth.authorization import require_organization_access
+from app.modules.billing.service import ensure_plan_resource_allowed
 from app.modules.brands.model import Brand
 from app.modules.brands.repository import get_authorized_brand
 from app.modules.brands.schemas import BrandCreate, BrandUpdate
@@ -16,6 +17,7 @@ def create_brand(
     payload: BrandCreate,
 ) -> Brand:
     require_organization_access(session, user, organization_id)
+    ensure_plan_resource_allowed(session, organization_id, "brand")
     brand = Brand(
         organization_id=organization_id,
         name=payload.name,

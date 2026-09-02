@@ -1,6 +1,6 @@
 # AI Performance Marketing SaaS
 
-B2B 커머스 팀의 광고 관찰·분석 흐름을 연결하는 MVP입니다. 현재 Phase 5 Automated Market Intelligence 기반까지 구현되어 Organization 단위 데이터 격리, Brand/Competitor 관리, 광고 수집 소스 설정, 비동기 수집·분석 Job과 usage summary를 브라우저에서 사용할 수 있습니다. 기본값은 네트워크나 비용이 없는 deterministic `FakeAdLibraryCollector`와 `FakeAIProvider`이며, 실제 광고 라이브러리 adapter는 승인된 production 데이터 공급자가 확정된 후 연결합니다.
+B2B 커머스 팀의 광고 관찰·분석 흐름을 연결하는 MVP입니다. 현재 Phase 5 Automated Market Intelligence 기반까지 구현되어 Organization 단위 데이터 격리, Brand/Competitor 관리, Meta·TikTok 광고 수집 소스 설정, 비동기 수집·분석 Job과 usage summary를 브라우저에서 사용할 수 있습니다. 기본값은 네트워크나 비용이 없는 deterministic `FakeAdLibraryCollector`와 `FakeAIProvider`입니다.
 
 ## 구조
 
@@ -28,9 +28,9 @@ B2B 커머스 팀의 광고 관찰·분석 흐름을 연결하는 MVP입니다. 
 PostgreSQL을 먼저 실행하고 migration을 적용한 뒤 전체 stack을 시작합니다.
 
 ```powershell
-docker compose -f infra/docker-compose.yml up -d postgres redis
-docker compose -f infra/docker-compose.yml run --build --rm api alembic upgrade head
-docker compose -f infra/docker-compose.yml up --build -d --wait
+docker compose --env-file .env -f infra/docker-compose.yml up -d postgres redis
+docker compose --env-file .env -f infra/docker-compose.yml run --build --rm api alembic upgrade head
+docker compose --env-file .env -f infra/docker-compose.yml up --build -d --wait
 ```
 
 기본 주소:
@@ -66,6 +66,78 @@ SUPABASE_URL=https://project-ref.supabase.co
 SUPABASE_JWT_AUDIENCE=authenticated
 ```
 
+## $40 구독과 운영 Provider 설정
+
+사용자는 Web의 첫 번째 `플랜` 단계에서 Organization 단위로 월 `$40` 플랜을 결제합니다. 결제가 활성화되면 월 provider credit `$15`, AI 분석 200회, 자동 수집 50회, 브랜드 1개, 경쟁 브랜드 5개 한도가 적용됩니다. 비용이 발생하는 Job은 실행 전에 credit을 예약하고 성공 시 실제 또는 보수적 추정 비용으로 확정하며, 실패하면 예약을 반환합니다.
+
+사용자가 Web에서 입력하는 정보는 다음뿐입니다.
+
+- 회사/팀 이름: `플랜` 또는 `브랜드` 단계
+- 브랜드 이름과 업종: `브랜드` 단계
+- 경쟁 브랜드 이름과 웹사이트: `시장` 단계
+- 플랫폼, 국가, 언어, 경쟁사 또는 검색어, 주기: `자동 수집` 단계
+
+Apify token, OpenAI key, Stripe secret은 사용자 화면에 입력하지 않습니다. local에서는 Git에 포함되지 않는 root `.env`, production에서는 배포 환경의 secret manager에 입력합니다. `NEXT_PUBLIC_*` 변수나 frontend bundle에는 절대 넣지 않습니다.
+
+### 1. Stripe
+
+Stripe Dashboard에서 월 `$40 USD` recurring Product/Price를 하나 만들고 다음 값을 설정합니다. 운영 API에만 주입합니다.
+
+```dotenv
+APP_ENV=production
+BILLING_PROVIDER=stripe
+BILLING_ENFORCEMENT_ENABLED=true
+BILLING_MONTHLY_PRICE_USD=40.00
+BILLING_MONTHLY_CREDIT_USD=15.00
+STRIPE_SECRET_KEY=<Stripe secret key>
+STRIPE_PRICE_ID=<월 40 USD recurring price id>
+STRIPE_WEBHOOK_SECRET=<webhook signing secret>
+BILLING_SUCCESS_URL=https://<web-domain>/?billing=success
+BILLING_CANCEL_URL=https://<web-domain>/?billing=cancelled
+```
+
+Stripe webhook endpoint는 `https://<api-domain>/api/v1/billing/webhooks/stripe`이며 다음 event를 전달합니다.
+
+- `checkout.session.completed`
+- `customer.subscription.created`
+- `customer.subscription.updated`
+- `customer.subscription.deleted`
+
+local 기본값 `BILLING_PROVIDER=fake`는 카드를 청구하지 않고 플랜을 즉시 활성화합니다. production에서는 fake billing과 enforcement 비활성 상태로 API가 시작되지 않습니다.
+
+### 2. Apify
+
+Apify 약관과 월 예산을 승인한 뒤 API token을 production Worker에만 주입합니다. 현재 플랫폼별 실행 상한은 `$0.25`, 결과 상한은 25건입니다.
+
+```dotenv
+AD_LIBRARY_PROVIDER=apify
+APIFY_API_TOKEN=<Apify API token>
+APIFY_META_ACTOR_ID=apify~facebook-ads-scraper
+APIFY_TIKTOK_ACTOR_ID=khadinakbar~tiktok-ads-scraper
+APIFY_META_MAX_ITEMS_PER_SYNC=25
+APIFY_META_MAX_CHARGE_USD_PER_SYNC=0.25
+APIFY_MAX_ITEMS_PER_SYNC=25
+APIFY_MAX_CHARGE_USD_PER_SYNC=0.25
+APIFY_TIKTOK_PERIOD_DAYS=30
+APIFY_CONFIGURED=true
+```
+
+`APIFY_API_TOKEN`은 Worker 전용 secret이고, `APIFY_CONFIGURED=true`는 API가 Web에 secret 없이 연결 상태만 알리기 위한 비민감 플래그입니다.
+
+### 3. OpenAI
+
+OpenAI project에서 Worker용 API key를 발급해 production Worker에만 주입합니다.
+
+```dotenv
+AI_PROVIDER=openai
+OPENAI_API_KEY=<OpenAI project API key>
+OPENAI_MODEL=gpt-5.6-luna
+OPENAI_TIMEOUT_SECONDS=30
+OPENAI_CONFIGURED=true
+```
+
+`OPENAI_API_KEY`는 Worker 전용이고, `OPENAI_CONFIGURED=true`는 Web의 연결 상태 표시용 비민감 플래그입니다.
+
 현재 주요 endpoint:
 
 - `GET /api/v1/me`
@@ -90,7 +162,7 @@ Web 작업 공간은 `브랜드 → 시장 → 자동 수집 → 분석` 4단계
 
 1. `브랜드` 화면에서 회사/팀과 분석 기준 브랜드를 선택하거나 만듭니다.
 2. `시장` 화면에서 베트남 시장에서 비교할 경쟁 브랜드를 등록합니다. 경쟁사 없이 업종 키워드만으로도 다음 단계로 진행할 수 있습니다.
-3. `자동 수집` 화면에서 Meta/TikTok, 경쟁사·업종, 국가·언어와 자동 수집 주기를 지정합니다.
+3. `시장 광고 조사` 화면에서 Meta 또는 TikTok, 경쟁사·업종, 국가·언어와 자동 수집 주기를 지정합니다. 각 공식 라이브러리 링크에서 원본도 확인할 수 있습니다.
 4. scheduler가 주기적으로 수집하며, 필요하면 `지금 수집`으로 즉시 실행하거나 일시중지할 수 있습니다.
 5. `분석` 화면에서 수집 광고와 구조화 분석 결과를 확인합니다. 자동 수집에서 누락된 광고만 `직접 추가`로 보완합니다.
 6. 같은 분석 화면에서 Organization별 AI 호출 수와 추정 비용을 확인합니다.
@@ -99,12 +171,32 @@ Web 작업 공간은 `브랜드 → 시장 → 자동 수집 → 분석` 4단계
 
 Web과 API를 다른 origin으로 실행하므로 `CORS_ORIGINS`에 허용할 Web origin을 쉼표로 구분해 지정합니다. local 기본값은 `http://localhost:3000,http://localhost:3001`입니다.
 
-광고 라이브러리 수집은 local/test에서 기본적으로 synthetic 광고 1건을 반환하는 Fake Collector를 사용합니다. 실제 Meta/TikTok 데이터를 수집한다고 오해하지 않도록 production adapter가 준비되지 않은 환경에서는 `AD_LIBRARY_PROVIDER=disabled`로 설정합니다.
+광고 라이브러리 수집은 local/test에서 synthetic 광고를 반환하는 Fake Collector를 사용합니다. production 설정은 Meta에 Apify 공식 유지보수 Facebook Ads Library Actor를, TikTok에 Creative Center Top Ads Actor를 사용합니다. Meta는 공개 웹 광고 자료라 누락·구조 변경 가능성이 있고, TikTok은 경쟁사의 전체 광고가 아닌 공개 인기 광고 표본입니다. 실제 운영 전에는 약관·예산 승인과 베트남 유료 smoke가 필요합니다.
 
 ```dotenv
 AD_LIBRARY_PROVIDER=fake
 COLLECTION_JOB_MAX_RETRIES=2
 COLLECTION_JOB_RETRY_DELAY_SECONDS=5
+```
+
+승인 후 실제 Worker에만 Apify token을 주입한다. API/Web/Scheduler에는 token을 전달하지 않는다. 호출당 수집 건수와 최대 과금을 동시에 제한한다.
+
+```dotenv
+AD_LIBRARY_PROVIDER=apify
+APIFY_API_TOKEN=<worker-only-secret>
+APIFY_META_ACTOR_ID=apify~facebook-ads-scraper
+APIFY_META_MAX_ITEMS_PER_SYNC=25
+APIFY_META_MAX_CHARGE_USD_PER_SYNC=0.25
+APIFY_TIKTOK_ACTOR_ID=khadinakbar~tiktok-ads-scraper
+APIFY_MAX_ITEMS_PER_SYNC=25
+APIFY_MAX_CHARGE_USD_PER_SYNC=0.25
+APIFY_TIKTOK_PERIOD_DAYS=30
+```
+
+실제 베트남 광고 smoke는 비용이 발생하므로 명시적으로 실행한다.
+
+```powershell
+docker compose --env-file .env -f infra/docker-compose.yml --profile test run --rm -e RUN_APIFY_SMOKE=1 backend-test pytest -m apify_smoke
 ```
 
 ## Phase 2 Creative 분석 Golden Path
@@ -153,8 +245,7 @@ Secret 처리 원칙:
 실제 비용이 발생하는 smoke test는 두 opt-in 조건을 모두 만족할 때만 실행됩니다. `OPENAI_API_KEY`는 명령 인자에 값을 직접 쓰지 말고 현재 shell 환경에 미리 주입합니다.
 
 ```powershell
-$env:RUN_OPENAI_SMOKE="1"
-docker compose -f infra/docker-compose.yml --profile test run --rm -e RUN_OPENAI_SMOKE=1 -e OPENAI_API_KEY backend-test pytest -m openai_smoke
+docker compose --env-file .env -f infra/docker-compose.yml --profile test run --rm -e RUN_OPENAI_SMOKE=1 backend-test pytest -m openai_smoke
 ```
 
 OpenAI 가격은 [공식 GPT-5.6 Luna 모델 페이지](https://developers.openai.com/api/docs/models/gpt-5.6-luna)를 기준으로 `backend/app/ai/pricing.json`에 날짜별로 검토 가능한 config로 분리합니다. 가격 변경 시 코드를 수정하지 않고 config와 검증 기대값을 함께 갱신합니다.
@@ -163,13 +254,13 @@ OpenAI 가격은 [공식 GPT-5.6 Luna 모델 페이지](https://developers.opena
 
 ```powershell
 $env:WEB_PORT="3001"
-docker compose -f infra/docker-compose.yml up -d --wait
+docker compose --env-file .env -f infra/docker-compose.yml up -d --wait
 ```
 
 컨테이너를 중지하되 PostgreSQL named volume은 보존합니다.
 
 ```powershell
-docker compose -f infra/docker-compose.yml down
+docker compose --env-file .env -f infra/docker-compose.yml down
 ```
 
 ## 검증 명령
@@ -177,9 +268,9 @@ docker compose -f infra/docker-compose.yml down
 Backend test와 lint는 host Python 설치 없이 development image에서 실행할 수 있습니다.
 
 ```powershell
-docker compose -f infra/docker-compose.yml --profile test run --build --rm backend-test
-docker compose -f infra/docker-compose.yml --profile test run --rm backend-test ruff check .
-docker compose -f infra/docker-compose.yml --profile test run --rm backend-test alembic check
+docker compose --env-file .env -f infra/docker-compose.yml --profile test run --build --rm backend-test
+docker compose --env-file .env -f infra/docker-compose.yml --profile test run --rm backend-test ruff check .
+docker compose --env-file .env -f infra/docker-compose.yml --profile test run --rm backend-test alembic check
 ```
 
 Integration test는 별도 `performance_marketing_test` PostgreSQL database를 만들고 빈 schema에 migration을 적용합니다. 안전을 위해 database 이름이 `_test`로 끝나지 않으면 schema 초기화를 거부합니다.
@@ -219,7 +310,7 @@ Invoke-RestMethod http://localhost:8000/health
 Docker로 PostgreSQL과 Redis를 먼저 실행합니다.
 
 ```powershell
-docker compose -f infra/docker-compose.yml up -d postgres redis
+docker compose --env-file .env -f infra/docker-compose.yml up -d postgres redis
 ```
 
 Python 3.12+ 환경에서 API를 실행합니다.

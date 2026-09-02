@@ -1,5 +1,6 @@
 """Import all persistence models so Alembic can discover their metadata."""
 
+from app.modules.billing.model import CreditLedger, Subscription
 from app.modules.brands.model import Brand
 from app.modules.competitors.model import Competitor
 from app.modules.creatives.model import Creative, CreativeAnalysis, CreativeAsset
@@ -12,6 +13,7 @@ from app.modules.users.model import User
 __all__ = [
     "ApiUsage",
     "Brand",
+    "CreditLedger",
     "Competitor",
     "Creative",
     "CreativeAnalysis",
@@ -20,5 +22,6 @@ __all__ = [
     "Job",
     "Membership",
     "Organization",
+    "Subscription",
     "User",
 ]

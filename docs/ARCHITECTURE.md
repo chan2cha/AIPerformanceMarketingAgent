@@ -72,6 +72,7 @@ Celery Beat는 별도 `scheduler` process로 실행하며, 5분마다 due `Colle
 │   │   │   ├── creatives/
 │   │   │   ├── jobs/
 │   │   │   ├── usage/
+│   │   │   ├── billing/
 │   │   │   └── recommendations/
 │   │   ├── ai/
 │   │   │   ├── router.py
@@ -175,7 +176,34 @@ Creative upsert
 
 성공·실패 후 `last_attempt_at`, `last_sync_at`, `last_error_code`, `next_sync_at`을 갱신한다. `paused` source는 scheduler가 건너뛰며 수동 실행 여부는 API 권한 검증 후 허용한다.
 
-`AdLibraryCollector`는 플랫폼별 API, 승인된 데이터 공급자, 로컬 Fake 구현을 감싼다. 공식 접근이 불가능한 국가·소스는 실패가 아니라 명시적인 `unavailable` 운영 상태로 처리한다. 제품의 핵심 수집 경로를 비공식 화면 스크래핑에 의존하지 않는다.
+`AdLibraryCollector`는 플랫폼별 API, 승인된 데이터 공급자, 로컬 Fake 구현을 감싼다. Meta와 TikTok 자동 수집은 Apify Actor adapter로 분리하고 Worker에서만 실행한다. 기존 Meta 수집 소스는 `20260824_0007` migration으로 다시 활성화한다. Meta 공식 광고 라이브러리와 TikTok Creative Center 링크는 결과 검증용 보조 경로로 유지한다.
+
+TikTok 공식 Commercial Content API가 베트남을 지원하지 않아 Apify의 Creative Center Top Ads Actor를 사용한다. Meta는 Apify가 유지보수하는 `apify/facebook-ads-scraper`에 VN 필터가 포함된 공개 광고 라이브러리 URL을 전달한다. 외부 Actor token은 Worker에만 주입하며 플랫폼별 `maxItems`와 `maxTotalChargeUsd`를 호출마다 전달한다. 응답은 Pydantic으로 검증하고 영구 원본 URL과 분석에 필요한 최소 메타데이터만 저장한다.
+
+## 5.2 Subscription / Credit Flow
+
+```text
+Stripe Checkout 또는 local Fake Billing
+        │
+        ▼
+Organization Subscription 활성화
+        │
+        ▼
+월간 CreditLedger grant
+        │
+        ▼
+비용 Job 생성 전 entitlement·한도 확인
+        │
+        ├── reservation
+        ├── 성공: release + settlement
+        └── 실패: release
+```
+
+- 구독, 제공량, provider credit은 Organization 단위로 격리한다.
+- Stripe는 `BillingProvider`의 첫 운영 adapter이며 billing domain이 Stripe SDK 객체에 의존하지 않는다.
+- Apify/OpenAI secret은 고객이 입력하지 않고 API/Worker의 배포 secret으로 관리한다.
+- Web에는 provider별 `configured` 상태만 반환하고 key/token 값은 반환하지 않는다.
+- Stripe webhook은 사용자 인증 대신 signature와 timestamp를 검증하며 Organization metadata로 tenant를 찾는다.
 
 ## 6. AI Provider Abstraction
 

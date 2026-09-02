@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.core.http import install_http_handlers
+from app.modules.billing.router import router as billing_router
 from app.modules.brands.router import router as brands_router
 from app.modules.competitors.router import router as competitors_router
 from app.modules.creatives.router import router as creatives_router
@@ -28,6 +29,7 @@ app.include_router(creatives_router)
 app.include_router(jobs_router)
 app.include_router(ingestion_router)
 app.include_router(usage_router)
+app.include_router(billing_router)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["system"])
